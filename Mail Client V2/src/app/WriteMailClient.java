@@ -2,18 +2,23 @@ package app;
 
 
 import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.InputStreamReader;
+import java.security.KeyStore;
+import java.security.PublicKey;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.mail.internet.MimeMessage;
+import java.security.cert.Certificate;
 
 import org.apache.xml.security.utils.JavaUtils;
 
 import com.google.api.services.gmail.Gmail;
 
+import model.mailclient.MailBody;
 import util.Base64;
 import util.GzipUtil;
 import util.IVHelper;
@@ -67,17 +72,35 @@ public class WriteMailClient extends MailClient {
 			IvParameterSpec ivParameterSpec2 = IVHelper.createIV();
 			aesCipherEnc.init(Cipher.ENCRYPT_MODE, secretKey, ivParameterSpec2);
 			
+			//sifrovanje
 			byte[] ciphersubject = aesCipherEnc.doFinal(compressedSubject.getBytes());
-			String ciphersubjectStr = Base64.encodeToString(ciphersubject);
+		    String ciphersubjectStr = Base64.encodeToString(ciphersubject);
 			System.out.println("Kriptovan subject: " + ciphersubjectStr);
 			
+			KeyStore ks = KeyStore.getInstance("JKS");
+			ks.load(new FileInputStream("./data/userB.jks"), "keystore2".toCharArray());
+			Certificate ubc = ks.getCertificate("bilja biljic");
+			PublicKey ubpk = ubc.getPublicKey();
+			
+			//inicijalizacija za sifrovanje
+			Cipher rsaCipherEnc = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+			rsaCipherEnc.init(Cipher.ENCRYPT_MODE, ubpk);
+			
+			byte[] cipherkey = rsaCipherEnc.doFinal(secretKey.getEncoded());
+			String cipherkeyStr = Base64.encodeToString(cipherkey);
+			System.out.println("Kljuc: " + secretKey.hashCode());
+			System.out.println("Kriptovani kljuc: " + cipherkeyStr);
+			
+			MailBody mb = new MailBody(ciphertextStr, ivParameterSpec1.getIV(), ivParameterSpec2.getIV(), cipherkeyStr);
+			String mailBody = mb.toCSV();
+			System.out.println("Telo email-a: " + mailBody);
 			
 			//snimaju se bajtovi kljuca i IV.
 			JavaUtils.writeBytesToFilename(KEY_FILE, secretKey.getEncoded());
 			JavaUtils.writeBytesToFilename(IV1_FILE, ivParameterSpec1.getIV());
 			JavaUtils.writeBytesToFilename(IV2_FILE, ivParameterSpec2.getIV());
 			
-        	MimeMessage mimeMessage = MailHelper.createMimeMessage(reciever, ciphersubjectStr, ciphertextStr);
+        	MimeMessage mimeMessage = MailHelper.createMimeMessage(reciever, ciphersubjectStr, mailBody);
         	MailWritter.sendMessage(service, "me", mimeMessage);
         	
         }catch (Exception e) {
